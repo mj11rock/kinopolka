@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Медиасервер для телевизора. Запуск: python3 server.py"""
+import ipaddress
 import json
 import mimetypes
 import re
@@ -18,6 +19,11 @@ MEDIA = CFG['media_dir']
 WEB = ROOT / 'web'
 STATE_FILE = ROOT / 'data' / 'progress.json'
 IMAGE_NAMES = ('poster', 'folder', 'cover')
+IMAGE_EXT = {'.jpg', '.jpeg', '.png', '.webp'}
+# из media/ отдаём только то, что нужно плееру: никаких .html и прочего из раздач
+SERVABLE_EXT = VIDEO_EXT | SUB_EXT | IMAGE_EXT
+# приложение на ТВ открыто из file:// — браузер присылает Origin "null" или "file://"
+APP_ORIGINS = {'null', 'file://'}
 BACKDROP_NAMES = ('backdrop', 'fanart', 'background')
 
 MIME = {'.mkv': 'video/x-matroska', '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.webm': 'video/webm',
@@ -313,11 +319,25 @@ def parse_subs(p: Path):
 
 # ---------- HTTP ----------
 
-def safe_media_path(relpath):
+def safe_media_path(relpath, allowed=SERVABLE_EXT):
     p = (MEDIA / unquote(relpath)).resolve()
     if MEDIA.resolve() not in p.parents or not p.is_file():
         return None
+    if p.suffix.lower() not in allowed or (MEDIA / 'inbox').resolve() in p.parents:
+        return None
     return p
+
+
+def host_allowed(host):
+    """Защита от DNS rebinding: пускаем только по IP, localhost и именам из config.json."""
+    name = (host or '').rsplit(':', 1)[0].strip('[]').lower()
+    if name in ('localhost', '') or name in [h.lower() for h in CFG.get('allowed_hosts', [])]:
+        return True
+    try:
+        ipaddress.ip_address(name)
+        return True
+    except ValueError:
+        return False
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -327,10 +347,27 @@ class Handler(BaseHTTPRequestHandler):
         if '/api/progress' not in self.path:
             print(f'{self.address_string()} {fmt % args}')
 
+    def origin_ok(self):
+        """Свой интерфейс (тот же хост) или приложение на ТВ. Чужие сайты — нет."""
+        origin = self.headers.get('Origin')
+        if origin is None or origin in APP_ORIGINS:
+            return True
+        return urlparse(origin).netloc == self.headers.get('Host')
+
+    def guard(self):
+        if host_allowed(self.headers.get('Host')) and self.origin_ok():
+            return True
+        self.send_json({'error': 'forbidden'}, 403)
+        return False
+
     def cors(self):
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Range')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, HEAD, OPTIONS')
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        origin = self.headers.get('Origin')
+        if origin in APP_ORIGINS:
+            self.send_header('Access-Control-Allow-Origin', origin)
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type, Range')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, HEAD, OPTIONS')
+            self.send_header('Vary', 'Origin')
 
     def send_json(self, obj, code=200):
         body = json.dumps(obj, ensure_ascii=False).encode()
@@ -343,6 +380,8 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_OPTIONS(self):
+        if not self.guard():
+            return
         self.send_response(204)
         self.cors()
         self.send_header('Content-Length', '0')
@@ -354,6 +393,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self, head=False):
         url = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(url.query).items()}
+        if not self.guard():
+            return
         try:
             if url.path == '/api/home':
                 return self.send_json(home())
@@ -361,7 +402,7 @@ class Handler(BaseHTTPRequestHandler):
                 d = show_details(q.get('id', ''))
                 return self.send_json(d) if d else self.send_json({'error': 'not found'}, 404)
             if url.path == '/api/subs':
-                p = safe_media_path(q.get('id', ''))
+                p = safe_media_path(q.get('id', ''), SUB_EXT)
                 return self.send_json(parse_subs(p)) if p else self.send_json([], 404)
             if url.path == '/api/ping':
                 return self.send_json({'ok': True, 'name': 'Кинополка'})
@@ -384,6 +425,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         url = urlparse(self.path)
+        if not self.guard():
+            return
+        # JSON-only: обычная HTML-форма с чужого сайта так не отправит
+        if not (self.headers.get('Content-Type') or '').startswith('application/json'):
+            return self.send_json({'error': 'json expected'}, 415)
         length = int(self.headers.get('Content-Length') or 0)
         try:
             data = json.loads(self.rfile.read(length) or b'{}')

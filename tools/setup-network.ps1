@@ -13,16 +13,16 @@ if ($text -notmatch 'networkingMode\s*=\s*mirrored') {
     Write-Host "Включен networkingMode=mirrored в $cfg"
 }
 
-# 2. Разрешаем входящие подключения к порту (брандмауэр Hyper-V для WSL и обычный)
+# 2. Разрешаем входящие подключения к порту только из домашней сети
+#    (частные/доменные профили и частные диапазоны адресов)
+$lan = @('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16')
 $wslVm = '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}'
-if (-not (Get-NetFirewallHyperVRule -Name 'TVStreaming' -ErrorAction SilentlyContinue)) {
-    New-NetFirewallHyperVRule -Name 'TVStreaming' -DisplayName 'TV streaming (WSL)' -Direction Inbound `
-        -VMCreatorId $wslVm -Protocol TCP -LocalPorts $port | Out-Null
-}
-if (-not (Get-NetFirewallRule -Name 'TVStreaming' -ErrorAction SilentlyContinue)) {
-    New-NetFirewallRule -Name 'TVStreaming' -DisplayName 'TV streaming' -Direction Inbound `
-        -Protocol TCP -LocalPort $port -Action Allow -Profile Private,Domain | Out-Null
-}
+Remove-NetFirewallHyperVRule -Name 'TVStreaming' -ErrorAction SilentlyContinue
+New-NetFirewallHyperVRule -Name 'TVStreaming' -DisplayName 'TV streaming (WSL)' -Direction Inbound `
+    -VMCreatorId $wslVm -Protocol TCP -LocalPorts $port -RemoteAddresses $lan -Profiles Private,Domain | Out-Null
+Remove-NetFirewallRule -Name 'TVStreaming' -ErrorAction SilentlyContinue
+New-NetFirewallRule -Name 'TVStreaming' -DisplayName 'TV streaming' -Direction Inbound `
+    -Protocol TCP -LocalPort $port -RemoteAddress LocalSubnet -Action Allow -Profile Private,Domain | Out-Null
 
 Write-Host "Готово. Перезапускаю WSL, чтобы применить настройки..."
 wsl --shutdown
