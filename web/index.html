@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1920, user-scalable=no">
+<title>Кинополка</title>
+<link rel="stylesheet" href="app.css">
+<script src="$WEBAPIS/webapis/webapis.js"></script>
+<script src="server-url.js"></script>
+</head>
+<body>
+<div id="app">
+  <object id="avplayer" type="application/avplayer"></object>
+  <video id="video" preload="auto"></video>
+
+  <div id="backdrop"><div id="backdrop-img"></div><div id="backdrop-shade"></div></div>
+
+  <header id="topbar">
+    <div class="brand"><span class="brand-mark"></span>Кинополка</div>
+    <nav id="tabs">
+      <div class="tab focusable" data-tab="home">Главная</div>
+      <div class="tab focusable" data-tab="shows">Сериалы</div>
+      <div class="tab focusable" data-tab="movies">Фильмы</div>
+      <div class="tab focusable" data-tab="refresh">Обновить</div>
+    </nav>
+    <div id="clock"></div>
+  </header>
+
+  <main id="screens"></main>
+
+  <section id="player" class="hidden">
+    <div id="subtitle"></div>
+    <div id="osd">
+      <div class="osd-top">
+        <div id="osd-title"></div>
+        <div id="osd-sub"></div>
+      </div>
+      <div class="osd-bottom">
+        <div class="seek-row">
+          <span id="t-cur">0:00</span>
+          <div id="seekbar" class="focusable">
+            <div id="seek-buf"></div><div id="seek-fill"></div><div id="seek-knob"><span id="seek-tip"></span></div>
+          </div>
+          <span id="t-dur">0:00</span>
+        </div>
+        <div id="osd-buttons"></div>
+      </div>
+    </div>
+    <div id="spinner"></div>
+    <div id="player-msg" class="hidden"></div>
+    <div id="next-card" class="hidden"></div>
+  </section>
+
+  <div id="menu" class="hidden"><div class="menu-box"><h3 id="menu-title"></h3><div id="menu-items"></div></div></div>
+  <div id="toast" class="hidden"></div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
