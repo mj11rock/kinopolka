@@ -14,6 +14,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import sys
 import time
 from pathlib import Path
@@ -183,9 +184,23 @@ def move(src: Path, dst: Path, dry):
         print(f'  ! уже есть: {dst}')
         return False
     print(f'  {src.name}\n    -> {dst}')
-    if not dry:
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(src), str(dst))
+    if dry:
+        return True
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    # файлы с атрибутом Windows «Только чтение» нельзя ни переименовать, ни удалить
+    if not os.access(src, os.W_OK):
+        os.chmod(src, src.stat().st_mode | stat.S_IWUSR)
+    try:
+        os.rename(src, dst)  # в пределах диска — мгновенно
+    except OSError:
+        try:
+            shutil.move(str(src), str(dst))  # другой диск — копирование
+        except OSError as e:
+            # не оставляем копию, если исходник удалить не вышло: иначе файл окажется в двух местах
+            if src.exists() and dst.exists():
+                dst.unlink()
+            print(f'  ! не удалось переместить ({e.strerror}), файл остался в inbox')
+            return False
     return True
 
 
@@ -209,7 +224,12 @@ def sort_inbox(dry=False, quiet=False):
             continue
         dst = target_for(info, v.suffix.lower(), media)
         subs = related_subs(v)
-        if move(v, dst, dry):
+        try:
+            ok = move(v, dst, dry)
+        except OSError as e:
+            print(f'  ! ошибка с {v.name}: {e}')
+            continue
+        if ok:
             moved += 1
             for s in subs:
                 # "Видео.rus.srt" -> "<новое имя>.rus.srt"

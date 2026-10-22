@@ -66,13 +66,20 @@ def main():
         subprocess.run(cmd, check=True)
 
     run(tizen, 'package', '-t', 'wgt', '-s', a.profile, '--', path(out))
-    wgt = next(out.glob('*.wgt'))
+    # Tizen называет пакет по <name> из config.xml; кириллица ломается в cmd.exe — переименуем
+    wgt = out / 'kinopolka.wgt'
+    next(p for p in out.glob('*.wgt') if p != wgt).replace(wgt)
     print(f'Пакет: {wgt}')
     if a.tv:
         sdb = find(SDB_CANDIDATES)
         run(sdb, 'connect', a.tv)
-        target = subprocess.check_output([sdb, 'devices'], text=True).strip().splitlines()[-1].split()[-1]
-        run(tizen, 'install', '-n', path(wgt), '-t', target)
+        # строки вида "192.168.0.251:26101   device   UE55CU8500UXUZ"
+        devices = subprocess.check_output([sdb, 'devices'], text=True).splitlines()
+        target = next((l.split()[-1] for l in devices if l.startswith(a.tv) and '\tdevice' in l.replace(' ', '\t')), None)
+        if not target:
+            sys.exit(f'Телевизор {a.tv} не подключился. Проверь, что на ТВ включён режим разработчика '
+                     f'и в Host PC IP указан IP этого компьютера, затем перезагрузи ТВ.')
+        run(tizen, 'install', '-n', wgt.name, '-t', target, '--', path(out))
         print('Готово! Приложение «Кинополка» появилось на телевизоре.')
 
 

@@ -23,6 +23,12 @@
   function el(html) {
     const d = document.createElement('div');
     d.innerHTML = html.trim();
+    // Tizen по умолчанию запрещает style="..." в разметке (CSP), а element.style — нет.
+    // Поэтому динамические стили передаём через data-атрибуты и выставляем тут.
+    Array.prototype.forEach.call(d.querySelectorAll('[data-bg], [data-w]'), (n) => {
+      if (n.dataset.bg) n.style.background = n.dataset.bg;
+      if (n.dataset.w) n.style.width = n.dataset.w + '%';
+    });
     return d.firstChild;
   }
   // приложение на ТВ подтверждает себя токеном (вшивается при сборке), браузеру на ПК он не нужен
@@ -116,12 +122,12 @@
     if (item.poster) return '<img src="' + esc(mediaUrl(item.poster)) + '" alt="">';
     const h = hue(title);
     const bg = 'linear-gradient(155deg, hsl(' + h + ',55%,42%) 0%, hsl(' + ((h + 40) % 360) + ',60%,16%) 100%)';
-    return '<div class="ph" style="background:' + bg + '"><div class="ph-letter">' + esc(title.charAt(0).toUpperCase()) +
+    return '<div class="ph" data-bg="' + bg + '"><div class="ph-letter">' + esc(title.charAt(0).toUpperCase()) +
       '</div><div class="ph-title">' + esc(title) + '</div>' + (sub ? '<div class="ph-sub">' + esc(sub) + '</div>' : '') + '</div>';
   }
   function progressHtml(p) {
     if (!p || p.watched || !p.dur || p.pos < 5) return '';
-    return '<div class="pbar"><div style="width:' + Math.min(100, p.pos / p.dur * 100).toFixed(1) + '%"></div></div>';
+    return '<div class="pbar"><div data-w="' + Math.min(100, p.pos / p.dur * 100).toFixed(1) + '"></div></div>';
   }
   function itemTitle(it) {
     return it.type === 'episode' ? it.showTitle : it.title;
@@ -346,7 +352,7 @@
   function errorScreenHtml(err) {
     return '<div class="grid-head">Нет связи с компьютером</div><div class="empty">Проверь, что на ПК запущен сервер (<code>start.sh</code>), ' +
       'и что ТВ и ПК в одной сети.<br>Адрес сервера: <code>' + esc(API || location.host) + '</code><br><small>' + esc(err) + '</small></div>' +
-      (IS_TIZEN ? '<div class="buttons" style="padding:30px 80px"><div class="btn focusable" id="change-server">Изменить адрес</div></div>' : '');
+      (IS_TIZEN ? '<div class="buttons error-actions"><div class="btn focusable" id="change-server">Изменить адрес</div></div>' : '');
   }
   function bindErrorButtons(root) {
     const b = root.querySelector('#change-server');
@@ -389,7 +395,7 @@
         data = d;
         scr.el.innerHTML = '';
         scr.el.appendChild(spot);
-        const box = el('<div class="scroller" style="top:480px;height:600px"><div class="scroll-inner" data-snap="rows"></div></div>');
+        const box = el('<div class="scroller rows-area"><div class="scroll-inner" data-snap="rows"></div></div>');
         const inner = box.firstChild;
         [row('Продолжить просмотр', d.continue, { wide: true, key: 'c' }),
           row('Недавно добавленные', d.recent, { key: 'r' }),
