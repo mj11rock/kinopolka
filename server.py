@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Медиасервер для телевизора. Запуск: python3 server.py"""
+import hmac
 import ipaddress
 import json
 import mimetypes
 import re
+import secrets
 import threading
 import time
 import traceback
@@ -22,8 +24,10 @@ IMAGE_NAMES = ('poster', 'folder', 'cover')
 IMAGE_EXT = {'.jpg', '.jpeg', '.png', '.webp'}
 # из media/ отдаём только то, что нужно плееру: никаких .html и прочего из раздач
 SERVABLE_EXT = VIDEO_EXT | SUB_EXT | IMAGE_EXT
-# приложение на ТВ открыто из file:// — браузер присылает Origin "null" или "file://"
+# приложение на ТВ открыто из file:// — браузер присылает Origin "null" или "file://".
+# Такой же Origin бывает у песочниц на чужих сайтах, поэтому приложение подтверждает себя токеном.
 APP_ORIGINS = {'null', 'file://'}
+TOKEN_FILE = ROOT / 'data' / 'app-token'
 BACKDROP_NAMES = ('backdrop', 'fanart', 'background')
 
 MIME = {'.mkv': 'video/x-matroska', '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.webm': 'video/webm',
@@ -323,9 +327,19 @@ def safe_media_path(relpath, allowed=SERVABLE_EXT):
     p = (MEDIA / unquote(relpath)).resolve()
     if MEDIA.resolve() not in p.parents or not p.is_file():
         return None
-    if p.suffix.lower() not in allowed or (MEDIA / 'inbox').resolve() in p.parents:
+    # только библиотека: inbox и прочее не отдаём (диск может не различать регистр — сравниваем casefold)
+    top = p.relative_to(MEDIA.resolve()).parts[0].casefold()
+    if p.suffix.lower() not in allowed or top not in ('movies', 'series'):
         return None
     return p
+
+
+def app_token():
+    """Секрет приложения на ТВ: создаётся при первом запуске, вшивается в .wgt при сборке."""
+    if not TOKEN_FILE.exists():
+        TOKEN_FILE.parent.mkdir(exist_ok=True)
+        TOKEN_FILE.write_text(secrets.token_urlsafe(24), encoding='utf-8')
+    return TOKEN_FILE.read_text(encoding='utf-8').strip()
 
 
 def host_allowed(host):
@@ -350,9 +364,15 @@ class Handler(BaseHTTPRequestHandler):
     def origin_ok(self):
         """Свой интерфейс (тот же хост) или приложение на ТВ. Чужие сайты — нет."""
         origin = self.headers.get('Origin')
-        if origin is None or origin in APP_ORIGINS:
+        if origin is None:
             return True
+        if origin in APP_ORIGINS:
+            # на предзапрос OPTIONS браузер токен не присылает, он нужен в самом запросе
+            return self.command == 'OPTIONS' or self.token_ok()
         return urlparse(origin).netloc == self.headers.get('Host')
+
+    def token_ok(self):
+        return hmac.compare_digest(self.headers.get('X-App-Token', ''), app_token())
 
     def guard(self):
         if host_allowed(self.headers.get('Host')) and self.origin_ok():
@@ -363,9 +383,9 @@ class Handler(BaseHTTPRequestHandler):
     def cors(self):
         self.send_header('X-Content-Type-Options', 'nosniff')
         origin = self.headers.get('Origin')
-        if origin in APP_ORIGINS:
+        if origin in APP_ORIGINS and (self.command == 'OPTIONS' or self.token_ok()):
             self.send_header('Access-Control-Allow-Origin', origin)
-            self.send_header('Access-Control-Allow-Headers', 'Content-Type, Range')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type, Range, X-App-Token')
             self.send_header('Access-Control-Allow-Methods', 'GET, POST, HEAD, OPTIONS')
             self.send_header('Vary', 'Origin')
 
@@ -515,6 +535,7 @@ def lan_ip():
 def main():
     for d in ('inbox', 'movies', 'series'):
         (MEDIA / d).mkdir(parents=True, exist_ok=True)
+    app_token()
     if CFG.get('auto_sort', True):
         threading.Thread(target=auto_sort_loop, daemon=True).start()
     port = int(CFG['port'])

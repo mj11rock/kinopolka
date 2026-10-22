@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from server import lan_ip  # noqa: E402
+from server import app_token, lan_ip  # noqa: E402
 from sorter import ROOT, load_config  # noqa: E402
 
 TIZEN_CANDIDATES = ['tizen', '/mnt/c/tizen-studio/tools/ide/bin/tizen.bat',
@@ -43,7 +43,8 @@ def main():
     if out.exists():
         shutil.rmtree(out)
     shutil.copytree(ROOT / 'web', out)
-    (out / 'server-url.js').write_text(f"window.SERVER_URL = '{server}';\n", encoding='utf-8')
+    (out / 'server-url.js').write_text(f"window.SERVER_URL = '{server}';\nwindow.APP_TOKEN = '{app_token()}';\n",
+                                      encoding='utf-8')
     print(f'Подготовлено: {out}\nАдрес сервера в приложении: {server}')
 
     tizen = find(TIZEN_CANDIDATES)

@@ -25,14 +25,20 @@
     d.innerHTML = html.trim();
     return d.firstChild;
   }
+  // приложение на ТВ подтверждает себя токеном (вшивается при сборке), браузеру на ПК он не нужен
+  function headers(extra) {
+    const h = extra || {};
+    if (window.APP_TOKEN) h['X-App-Token'] = window.APP_TOKEN;
+    return h;
+  }
   function api(path) {
-    return fetch(API + path).then((r) => {
+    return fetch(API + path, { headers: headers() }).then((r) => {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     });
   }
   function post(path, body) {
-    return fetch(API + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    return fetch(API + path, { method: 'POST', headers: headers({ 'Content-Type': 'application/json' }), body: JSON.stringify(body) })
       .then((r) => r.json()).catch(() => null);
   }
   function mediaUrl(rel) {
