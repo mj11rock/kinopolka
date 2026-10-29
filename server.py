@@ -6,6 +6,7 @@ import json
 import mimetypes
 import re
 import secrets
+import sys
 import threading
 import time
 import traceback
@@ -15,6 +16,7 @@ from urllib.parse import urlparse, parse_qs, unquote
 
 from sorter import (ROOT, VIDEO_EXT, SUB_EXT, EP_ONLY, load_config, parse_episode,
                     parse_season, sort_inbox)
+import torrents
 
 CFG = load_config()
 MEDIA = CFG['media_dir']
@@ -536,11 +538,22 @@ def main():
     for d in ('inbox', 'movies', 'series'):
         (MEDIA / d).mkdir(parents=True, exist_ok=True)
     app_token()
+    port = int(CFG['port'])
+    # порт занимаем первым: если сервер уже запущен, второй упадёт здесь,
+    # не успев запустить ещё один сортировщик и загрузчик поверх тех же папок
+    try:
+        srv = ThreadingHTTPServer(('0.0.0.0', port), Handler)
+    except OSError as e:
+        print(f'Порт {port} занят ({e.strerror}) — похоже, сервер уже запущен')
+        return 1
+    srv.daemon_threads = True
     if CFG.get('auto_sort', True):
         threading.Thread(target=auto_sort_loop, daemon=True).start()
-    port = int(CFG['port'])
-    srv = ThreadingHTTPServer(('0.0.0.0', port), Handler)
-    srv.daemon_threads = True
+    if CFG.get('torrents', True):
+        downloader = torrents.start(CFG)
+        if downloader:
+            threading.Thread(target=downloader.run, daemon=True).start()
+            print(f'Торренты: кидай .torrent в {downloader.watch}')
     print(f'Медиатека: {MEDIA}')
     print(f'Сервер запущен: http://{lan_ip()}:{port}  (Ctrl+C — остановить)')
     try:
@@ -550,4 +563,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())
