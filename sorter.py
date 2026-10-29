@@ -162,12 +162,35 @@ def target_for(info, ext, media: Path):
     return media / 'movies' / title / f'{title}{ext}'
 
 
+# Недокачанные файлы, уже проверенные на дыры: путь -> (размер, mtime)
+_holey = {}
+
+
+def has_holes(path: Path, samples=256, block=1 << 16):
+    """Торрент-клиенты заранее создают файл полного размера и заполняют его кусками
+    вразнобой, поэтому недокачанный файл выглядит готовым. В настоящем видео 64 КБ нулей
+    подряд не встречается — ищем такие блоки в равномерно разбросанных точках."""
+    st = path.stat()
+    key = (st.st_size, st.st_mtime_ns)
+    if _holey.get(path) == key:
+        return True
+    with open(path, 'rb') as f:
+        for k in range(samples):
+            f.seek(max(0, st.st_size * k // samples - block // 2))
+            chunk = f.read(block)
+            if len(chunk) == block and not any(chunk):
+                _holey[path] = key
+                return True
+    _holey.pop(path, None)
+    return False
+
+
 def is_settled(path: Path, min_age=60):
-    """Файл не качается прямо сейчас: нет .part-хвоста и давно не менялся."""
+    """Файл не качается прямо сейчас: нет .part-хвоста, давно не менялся и докачан целиком."""
     if path.suffix.lower() in PARTIAL_EXT:
         return False
     try:
-        return time.time() - path.stat().st_mtime > min_age
+        return time.time() - path.stat().st_mtime > min_age and not has_holes(path)
     except OSError:
         return False
 
